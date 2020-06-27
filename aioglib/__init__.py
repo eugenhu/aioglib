@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import time
+from typing import Optional
 from gi.repository import GLib
 
 
@@ -35,18 +36,54 @@ class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 class GLibEventLoop(asyncio.AbstractEventLoop):
     def __init__(self, context: GLib.MainContext) -> None:
         self._context = context
+        self._mainloop = None  # type: Optional[GLib.MainLoop]
+        self._old_running_loop = None  # type: Optional[asyncio.AbstractEventLoop]
 
     def run_forever(self):
-        raise NotImplementedError
+        if self.is_running():
+            raise RuntimeError('This event loop is already running')
+
+        try:
+            self._old_running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._old_running_loop = None
+
+        asyncio._set_running_loop(self)
+
+        self._mainloop = GLib.MainLoop(self._context)
+        self._mainloop.run()
 
     def run_until_complete(self, future):
         raise NotImplementedError
 
     def stop(self):
-        raise NotImplementedError
+        if self._mainloop is None:
+            return
 
-    def is_running(self):
-        raise NotImplementedError
+        self._mainloop.quit()
+        self._mainloop = None
+
+        asyncio._set_running_loop(self._old_running_loop)
+
+    def is_running(self) -> bool:
+        """Return True if MainContext associated with this GLibEventLoop is definitely in some running loop on
+        the calling thread. Return False if unsure."""
+        if self._mainloop is not None:
+            return self._mainloop.is_running()
+
+        # Use asyncio.get_running_loop() as a hint for what event loop is currently running.
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        # Another MainLoop might be running with the same MainContext as ours.
+        if (running_loop is not self and isinstance(running_loop, GLibEventLoop)
+                and running_loop._context == self._context):
+            return running_loop._mainloop is not None and running_loop._mainloop.is_running()
+
+        # Not sure if our context is in a running loop or not.
+        return False
 
     def is_closed(self) -> bool:
         return False
