@@ -13,6 +13,9 @@ def set_event_loop(loop: 'GLibEventLoop') -> None:
 def new_event_loop() -> 'GLibEventLoop':
     ...
 
+def get_default_loop() -> 'GLibEventLoop':
+    """Return a GLibEventLoop for the default main context."""
+
 
 class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
     def get_event_loop(self) -> 'GLibEventLoop':
