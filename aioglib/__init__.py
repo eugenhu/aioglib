@@ -1,6 +1,5 @@
 import asyncio
 import sys
-import time
 from typing import Optional
 from gi.repository import GLib
 
@@ -116,8 +115,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         raise NotImplementedError
 
     def time(self) -> float:
-        # https://www.python.org/dev/peps/pep-3156/#specifying-times
-        return time.monotonic()
+        return GLib.get_monotonic_time()/1e6
 
     def create_future(self):
         raise NotImplementedError
