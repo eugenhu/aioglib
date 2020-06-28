@@ -228,25 +228,39 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def call_soon(self, callback, *args, context=None) -> 'GLibSourceHandle':
         if self._debug:
             self._check_callback(callback, 'call_soon')
+            frame = sys._getframe(1)
+        else:
+            frame = None
 
-        return self._idle_add(callback, args, context)
+        return self._idle_add(callback, args, context, frame)
 
     def call_soon_threadsafe(self, callback, *args, context=None) -> 'GLibSourceHandle':
         if self._debug:
-            self._check_callback(callback, 'call_soon')
+            self._check_callback(callback, 'call_soon_threadsafe')
+            frame = sys._getframe(1)
+        else:
+            frame = None
 
         # Adding and removing sources to contexts is thread-safe.
-        return self._idle_add(callback, args, context)
+        return self._idle_add(callback, args, context, frame)
 
-    def _idle_add(self, callback, args, context=None) -> 'GLibSourceHandle':
+    def _idle_add(self, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
         source = GLib.Idle()
+        return self._attach_source_with_callback(source, callback, args, context, frame)
+
+    def _attach_source_with_callback(
+            self,
+            source,
+            callback,
+            args,
+            context=None,
+            frame=None,
+    ) -> 'GLibSourceHandle':
         source_name = _format_helpers.format_callback_source(callback, args)
 
-        if self._debug:
-            outer_frame = sys._getframe(1)
-            traceback = _format_helpers.extract_stack(outer_frame)
-
-            source_name += ' created at {f.filename}:{f.lineno}'.format(f=outer_frame)
+        if frame is not None:
+            traceback = _format_helpers.extract_stack(frame)
+            source_name += ' created at {f.filename}:{f.lineno}'.format(f=frame)
         else:
             traceback = None
 
