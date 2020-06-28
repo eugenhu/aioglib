@@ -443,6 +443,10 @@ class GLibSourceHandle:
         if self.cancelled():
             info.append('cancelled')
 
+        when = self.when()
+        if when >= 0:
+            info.append('when={}'.format(when))
+
         info.append(self._source.get_name())
 
         return '<{}>'.format(' '.join(info))
@@ -453,3 +457,6 @@ class GLibSourceHandle:
 
     def cancelled(self):
         return self._source.is_destroyed()
+    
+    def when(self) -> float:
+        return self._source.get_ready_time()/1e6
