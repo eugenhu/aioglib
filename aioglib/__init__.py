@@ -226,6 +226,19 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         logger.error('\n'.join(log_lines), exc_info=exc_info)
 
     def call_soon(self, callback, *args, context=None) -> 'GLibSourceHandle':
+        if self._debug:
+            self._check_callback(callback, 'call_soon')
+
+        return self._idle_add(callback, args, context)
+
+    def call_soon_threadsafe(self, callback, *args, context=None) -> 'GLibSourceHandle':
+        if self._debug:
+            self._check_callback(callback, 'call_soon')
+
+        # Adding and removing sources to contexts is thread-safe.
+        return self._idle_add(callback, args, context)
+
+    def _idle_add(self, callback, args, context=None) -> 'GLibSourceHandle':
         source = GLib.Idle()
         source_name = _format_helpers.format_callback_source(callback, args)
 
@@ -253,15 +266,20 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         return handle
 
-    def call_soon_threadsafe(self, callback, *args, context=None) -> 'GLibSourceHandle':
-        # Adding and removing sources to contexts is thread-safe.
-        return self.call_soon(self, callback, args, context)
-
     def call_later(self, delay, callback, *args):
         raise NotImplementedError
 
     def call_at(self, when, callback, *args):
         raise NotImplementedError
+
+    def _check_callback(self, callback: Any, method: str) -> None:
+        if (asyncio.iscoroutine(callback) or asyncio.iscoroutinefunction(callback)):
+            raise TypeError("coroutines cannot be used with {method}()".format(method=method))
+        if not callable(callback):
+            raise TypeError(
+                "a callable object was expected by {method}(), got {callback!r}"
+                .format(method=method, callback=callback)
+            )
 
     def time(self) -> float:
         return GLib.get_monotonic_time()/1e6
