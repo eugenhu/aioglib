@@ -1,20 +1,42 @@
 import asyncio
 import sys
+import threading
 from typing import Optional
 from gi.repository import GLib
 
 
 def get_event_loop() -> 'GLibEventLoop':
-    ...
+    """If called from the main thread, return a GLibEventLoop for the global default context. Otherwise,
+    return a GLibEventLoop for the thread default context, if one has been set, otherwise for the global
+    default context."""
+    if threading.current_thread() is threading.main_thread():
+        context = GLib.MainContext.default()
+    else:
+        context = GLib.MainContext.get_thread_default() or GLib.MainContext.default()
+
+    return GLibEventLoop(context)
 
 def set_event_loop(loop: 'GLibEventLoop') -> None:
     raise RuntimeError("set_event_loop() not supported")
 
 def new_event_loop() -> 'GLibEventLoop':
-    ...
+    """Create a new GLib.MainContext and return a GLibEventLoop wrapping the new context."""
+    context = GLib.MainContext()
+    return GLibEventLoop(context)
 
 def get_default_loop() -> 'GLibEventLoop':
-    """Return a GLibEventLoop for the default main context."""
+    """Return a GLibEventLoop for the global default context."""
+    context = GLib.MainContext.default()
+    return GLibEventLoop(context)
+
+def get_running_loop() -> 'GLibEventLoop':
+    """Return a GLibEventLoop for the context of the currently dispatching GLib.Source."""
+    current_source = GLib.main_current_source()
+    if current_source is None:
+        raise RuntimeError('no running event loop')
+
+    context = current_source.get_context()
+    return GLibEventLoop(context)
 
 
 class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
