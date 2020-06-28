@@ -248,6 +248,23 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         source = GLib.Idle()
         return self._attach_source_with_callback(source, callback, args, context, frame)
 
+    def call_later(self, delay, callback, *args, context=None):
+        if self._debug:
+            self._check_callback(callback, 'call_later')
+            frame = sys._getframe(1)
+        else:
+            frame = None
+
+        return self._timeout_add(delay, callback, args, context, frame)
+
+    def call_at(self, when, callback, *args):
+        raise NotImplementedError
+
+    def _timeout_add(self, delay, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
+        # GLib.Timeout expects milliseconds.
+        source = GLib.Timeout(delay * 1000)
+        return self._attach_source_with_callback(source, callback, args, context, frame)
+
     def _attach_source_with_callback(
             self,
             source,
@@ -279,12 +296,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         callback_wrapper.set_handle(handle)
 
         return handle
-
-    def call_later(self, delay, callback, *args):
-        raise NotImplementedError
-
-    def call_at(self, when, callback, *args):
-        raise NotImplementedError
 
     def _check_callback(self, callback: Any, method: str) -> None:
         if (asyncio.iscoroutine(callback) or asyncio.iscoroutinefunction(callback)):
