@@ -1,11 +1,16 @@
 import asyncio
 import sys
 import threading
-from typing import Optional, Any
+from typing import Optional, Any, Callable, Iterable
+import traceback
 from gi.repository import GLib
 
+try:
+    import contextvars
+except ImportError:
+    from . import _fakecontextvars as contextvars
 
-PY_37 = sys.version_info >= (3, 7)
+from . import _format_helpers
 
 
 def get_event_loop() -> 'GLibEventLoop':
@@ -83,8 +88,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         self._mainloop.run()
 
     def run_until_complete(self, future: asyncio.Future) -> Any:
-        # Copied from asyncio module.
-
         self._check_running()
 
         new_task = not asyncio.isfuture(future)
@@ -149,8 +152,33 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def default_exception_handler(self, context):
         raise NotImplementedError
 
-    def call_soon(self, callback, *args, context=None):
-        raise NotImplementedError
+    def call_soon(self, callback, *args, context=None) -> 'GLibSourceHandle':
+        source = GLib.Idle()
+        source_name = _format_helpers.format_callback_source(callback, args)
+
+        if self._debug:
+            outer_frame = sys._getframe(1)
+            traceback = _format_helpers.extract_stack(outer_frame)
+
+            source_name += ' created at {f.filename}:{f.lineno}'.format(f=outer_frame)
+        else:
+            traceback = None
+
+        source.set_name(source_name)
+
+        callback_wrapper = _CallbackWrapper(
+            callback=callback,
+            args=args,
+            exception_handler=self.call_exception_handler,
+            traceback=traceback,
+            context=context,
+        )
+        source.set_callback(callback_wrapper)
+
+        handle = GLibSourceHandle(source)
+        callback_wrapper.set_handle(handle)
+
+        return handle
 
     def call_soon_threadsafe(self, callback, *args, context=None):
         raise NotImplementedError
@@ -194,8 +222,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def remove_signal_handler(self, signum):
         raise NotImplementedError
 
-    # Stub implementation of debug
-
     _debug = False
 
     def set_debug(self, enabled: bool) -> None:
@@ -206,8 +232,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
 
 def _run_until_complete_cb(fut):
-    # Copied from asyncio module.
-
     if not fut.cancelled():
         exc = fut.exception()
         if isinstance(exc, (SystemExit, KeyboardInterrupt)):
@@ -216,10 +240,100 @@ def _run_until_complete_cb(fut):
             return
 
     try:
+        # Future.get_loop() was added in Python 3.7.
         fut.get_loop().stop()
     except AttributeError:
-        # Future.get_loop() was added in Python 3.7.
         pass
     else:
-        # Access private _loop attribute as fallback.
+        # Access private '_loop' attribute as fallback.
         fut._loop.stop()
+
+
+class _CallbackWrapper:
+    """Wrapper that calls an exception handler if an exception occurs during callback invocation."""
+
+    __slots__ = (
+        '_callback',
+        '_args',
+        '_exception_handler',
+        '_traceback',
+        '_context',
+        '_handle',
+        '__weakref__'
+    )
+
+    def __init__(
+            self,
+            callback: Callable,
+            args: Iterable,
+            exception_handler: Callable,
+            traceback: Optional[traceback.StackSummary] = None,
+            context: Optional[contextvars.Context] = None,
+    ) -> None:
+        self._callback = callback
+        self._args = args
+        self._exception_handler = exception_handler
+        self._traceback = traceback
+        self._context = context
+        self._handle = None  # type: Optional[Handle]
+
+    def set_handle(self, handle: 'Handle') -> None:
+        self._handle = handle
+
+    def __call__(self) -> bool:
+        try:
+            if self._context is not None:
+                self._context.run(self._callback, *self._args)
+            else:
+                self._callback(*self._args)
+        except (SystemExit, KeyboardInterrupt):
+            # Pass through SystemExit and KeyboardInterrupt
+            raise
+        except BaseException as exc:
+            exc_context = {}
+
+            exc_context['exception'] = exc
+
+            exc_context['message'] = 'Exception in callback {callback_repr}'.format(
+                callback_repr=_format_helpers.format_callback_source(self._callback, self._args)
+            )
+
+            if self._handle:
+                exc_context['handle'] = self._handle
+
+            if self._traceback:
+                exc_context['source_traceback'] = self._traceback
+
+            self._exception_handler(exc_context)
+
+        # Not sure if this is necessary, but something similar is done in asyncio.Handle.
+        self = None
+
+        # Remove this callback's source after it's been dispatched.
+        return GLib.SOURCE_REMOVE
+
+
+class GLibSourceHandle:
+    """Object returned by callback registration methods."""
+
+    __slots__ = ('_source', '__weakref__')
+
+    def __init__(self, source: GLib.Source) -> None:
+        self._source = source
+
+    def __repr__(self):
+        info = [__class__.__name__]
+
+        if self.cancelled():
+            info.append('cancelled')
+
+        info.append(self._source.get_name())
+
+        return '<{}>'.format(' '.join(info))
+
+    def cancel(self):
+        if self._source.is_destroyed(): return
+        self._source.destroy()
+
+    def cancelled(self):
+        return self._source.is_destroyed()
