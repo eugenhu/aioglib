@@ -1,9 +1,10 @@
 import asyncio
 import sys
 import threading
-from typing import Optional, Any, Callable, Iterable
+from typing import Optional, Any, Callable, Iterable, Mapping
 import traceback
 from gi.repository import GLib
+import logging
 
 try:
     import contextvars
@@ -11,6 +12,10 @@ except ImportError:
     from . import _fakecontextvars as contextvars
 
 from . import _format_helpers
+
+_ExceptionHandler = Callable[[asyncio.AbstractEventLoop, Mapping], Any]
+
+logger = logging.getLogger(__package__)
 
 
 def get_event_loop() -> 'GLibEventLoop':
@@ -76,6 +81,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def __init__(self, context: GLib.MainContext) -> None:
         self._context = context
         self._mainloop = None  # type: Optional[GLib.MainLoop]
+        self._exception_handler = None  # type: Optional[_ExceptionHandler]
 
     def run_forever(self):
         self._check_running()
@@ -148,17 +154,76 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def close(self):
         raise RuntimeError("close() not supported")
 
-    def get_exception_handler(self):
-        raise NotImplementedError
+    def get_exception_handler(self) -> Optional[_ExceptionHandler]:
+        return self._exception_handler
 
-    def set_exception_handler(self, handler):
-        raise NotImplementedError
+    def set_exception_handler(self, handler: Optional[_ExceptionHandler]) -> None:
+        if handler is not None and not callable(handler):
+            raise TypeError('A callable object or None is expected, got {!r}'.format(handler))
 
-    def call_exception_handler(self, context):
-        raise NotImplementedError
+        self._exception_handler = handler
+
+    def call_exception_handler(self, context: Mapping) -> None:
+        if self._exception_handler is None:
+            try:
+                self.default_exception_handler(context)
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException:
+                # Second protection layer for unexpected errors in the default implementation.
+                logger.error('Exception in default exception handler', exc_info=True)
+        else:
+            try:
+                self._exception_handler(self, context)
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException as exc:
+                # Exception in the user set custom exception handler.
+                try:
+                    # Log the exception raised in the custom handler in the default handler.
+                    self.default_exception_handler({
+                        'message': 'Unhandled error in exception handler',
+                        'exception': exc,
+                        'context': context,
+                    })
+                except (SystemExit, KeyboardInterrupt):
+                    raise
+                except BaseException:
+                    # Again, in case there is an unexpected error in the default implementation.
+                    logger.error(
+                        msg='Exception in default exception handler while handling an unexpected error in '
+                            'custom exception handler',
+                        exc_info=True,
+                    )
 
     def default_exception_handler(self, context):
-        raise NotImplementedError
+        message = context.get('message')
+        if not message:
+            message = 'Unhandled exception in event loop'
+
+        exception = context.get('exception')
+        if exception is not None:
+            exc_info = (type(exception), exception, exception.__traceback__)
+        else:
+            exc_info = False
+
+        log_lines = [message]
+        for key in sorted(context):
+            if key in {'message', 'exception'}:
+                continue
+
+            value = context[key]
+
+            if key == 'source_traceback':
+                tb = ''.join(traceback.format_list(value))
+                value = 'Object created at (most recent call last):\n'
+                value += tb.rstrip()
+            else:
+                value = repr(value)
+
+            log_lines.append('{}: {}'.format(key, value))
+
+        logger.error('\n'.join(log_lines), exc_info=exc_info)
 
     def call_soon(self, callback, *args, context=None) -> 'GLibSourceHandle':
         source = GLib.Idle()
@@ -273,7 +338,7 @@ class _CallbackWrapper:
             self,
             callback: Callable,
             args: Iterable,
-            exception_handler: Callable,
+            exception_handler: Callable[[Mapping], Any],
             traceback: Optional[traceback.StackSummary] = None,
             context: Optional[contextvars.Context] = None,
     ) -> None:
