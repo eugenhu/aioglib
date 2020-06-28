@@ -318,7 +318,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         return GLib.get_monotonic_time()/1e6
 
     def create_future(self):
-        raise NotImplementedError
+        return asyncio.Future(loop=self)
 
     def create_task(self, coro):
         raise NotImplementedError
