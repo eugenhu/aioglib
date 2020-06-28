@@ -253,8 +253,9 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         return handle
 
-    def call_soon_threadsafe(self, callback, *args, context=None):
-        raise NotImplementedError
+    def call_soon_threadsafe(self, callback, *args, context=None) -> 'GLibSourceHandle':
+        # Adding and removing sources to contexts is thread-safe.
+        return self.call_soon(self, callback, args, context)
 
     def call_later(self, delay, callback, *args):
         raise NotImplementedError
