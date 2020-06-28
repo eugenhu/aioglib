@@ -391,9 +391,9 @@ class _CallbackWrapper:
         self._exception_handler = exception_handler
         self._traceback = traceback
         self._context = context
-        self._handle = None  # type: Optional[Handle]
+        self._handle = None  # type: Optional[GLibSourceHandle]
 
-    def set_handle(self, handle: 'Handle') -> None:
+    def set_handle(self, handle: 'GLibSourceHandle') -> None:
         self._handle = handle
 
     def __call__(self) -> bool:
