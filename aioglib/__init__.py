@@ -136,10 +136,12 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def _check_is_owner(self) -> None:
         if not self._context.is_owner():
-            raise RuntimeError(
-                "The current thread ({}) is not the owner of this loop's context ({})"
-                .format(threading.current_thread().name, self._context)
-            )
+            got_ownership = self._context.acquire()
+            if not got_ownership:
+                raise RuntimeError(
+                    "The current thread ({}) is not the owner of this loop's context ({})"
+                    .format(threading.current_thread().name, self._context)
+                )
 
     def stop(self):
         if self._mainloop is None:
