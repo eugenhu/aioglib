@@ -33,18 +33,22 @@ def get_event_loop() -> 'GLibEventLoop':
 
     return GLibEventLoop(context)
 
+
 def set_event_loop(loop: 'GLibEventLoop') -> None:
     raise RuntimeError("set_event_loop() not supported")
+
 
 def new_event_loop() -> 'GLibEventLoop':
     """Create a new GLib.MainContext and return a GLibEventLoop wrapping the new context."""
     context = GLib.MainContext()
     return GLibEventLoop(context)
 
+
 def get_default_loop() -> 'GLibEventLoop':
     """Return a GLibEventLoop for the global default context."""
     context = GLib.MainContext.default()
     return GLibEventLoop(context)
+
 
 def get_running_loop() -> 'GLibEventLoop':
     """Return a GLibEventLoop for the context of the currently dispatching GLib.Source."""
@@ -53,6 +57,7 @@ def get_running_loop() -> 'GLibEventLoop':
         raise RuntimeError('no running event loop')
 
     return loop
+
 
 def _get_running_loop() -> Optional['GLibEventLoop']:
     current_source = GLib.main_current_source()
