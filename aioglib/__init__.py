@@ -257,8 +257,16 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         return self._timeout_add(delay, callback, args, context, frame)
 
-    def call_at(self, when, callback, *args):
-        raise NotImplementedError
+    def call_at(self, when, callback, *args, context=None):
+        if self._debug:
+            self._check_callback(callback, 'call_at')
+            frame = sys._getframe(1)
+        else:
+            frame = None
+
+        delay = when - self.time()
+
+        return self._timeout_add(delay, callback, args, context, frame)
 
     def _timeout_add(self, delay, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
         # GLib.Timeout expects milliseconds.
@@ -457,6 +465,6 @@ class GLibSourceHandle:
 
     def cancelled(self):
         return self._source.is_destroyed()
-    
+
     def when(self) -> float:
         return self._source.get_ready_time()/1e6
