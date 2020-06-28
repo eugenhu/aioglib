@@ -79,6 +79,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def run_forever(self):
         self._check_running()
+        self._check_is_owner()
 
         old_running_loop = asyncio._get_running_loop()
 
@@ -92,6 +93,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def run_until_complete(self, future: asyncio.Future) -> Any:
         self._check_running()
+        self._check_is_owner()
 
         new_task = not asyncio.isfuture(future)
         future = asyncio.ensure_future(future, loop=self)
@@ -120,6 +122,13 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def _check_running(self) -> None:
         if self.is_running():
             raise RuntimeError('This event loop is already running')
+
+    def _check_is_owner(self) -> None:
+        if not self._context.is_owner():
+            raise RuntimeError(
+                "The current thread ({}) is not the owner of this loop's context ({})"
+                .format(threading.current_thread().name, self._context)
+            )
 
     def stop(self):
         if self._mainloop is None:
