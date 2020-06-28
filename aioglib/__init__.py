@@ -76,16 +76,19 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def __init__(self, context: GLib.MainContext) -> None:
         self._context = context
         self._mainloop = None  # type: Optional[GLib.MainLoop]
-        self._old_running_loop = None  # type: Optional[asyncio.AbstractEventLoop]
 
     def run_forever(self):
         self._check_running()
 
-        self._old_running_loop = asyncio._get_running_loop()
-        asyncio._set_running_loop(self)
+        old_running_loop = asyncio._get_running_loop()
 
-        self._mainloop = GLib.MainLoop(self._context)
-        self._mainloop.run()
+        try:
+            self._mainloop = GLib.MainLoop(self._context)
+            asyncio._set_running_loop(self)
+            self._mainloop.run()
+        finally:
+            self._mainloop = None
+            asyncio._set_running_loop(old_running_loop)
 
     def run_until_complete(self, future: asyncio.Future) -> Any:
         self._check_running()
@@ -123,9 +126,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             return
 
         self._mainloop.quit()
-        self._mainloop = None
-
-        asyncio._set_running_loop(self._old_running_loop)
 
     def is_running(self) -> bool:
         running_loop = _get_running_loop()
