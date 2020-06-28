@@ -31,9 +31,16 @@ def get_default_loop() -> 'GLibEventLoop':
 
 def get_running_loop() -> 'GLibEventLoop':
     """Return a GLibEventLoop for the context of the currently dispatching GLib.Source."""
+    loop = _get_running_loop()
+    if loop is None:
+        raise RuntimeError('no running event loop')
+
+    return loop
+
+def _get_running_loop() -> Optional['GLibEventLoop']:
     current_source = GLib.main_current_source()
     if current_source is None:
-        raise RuntimeError('no running event loop')
+        return None
 
     context = current_source.get_context()
     return GLibEventLoop(context)
@@ -67,11 +74,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         if self.is_running():
             raise RuntimeError('This event loop is already running')
 
-        try:
-            self._old_running_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._old_running_loop = None
-
+        self._old_running_loop = asyncio._get_running_loop()
         asyncio._set_running_loop(self)
 
         self._mainloop = GLib.MainLoop(self._context)
@@ -90,24 +93,11 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         asyncio._set_running_loop(self._old_running_loop)
 
     def is_running(self) -> bool:
-        """Return True if MainContext associated with this GLibEventLoop is definitely in some running loop on
-        the calling thread. Return False if unsure."""
-        if self._mainloop is not None:
-            return self._mainloop.is_running()
+        running_loop = _get_running_loop()
+        if running_loop is None:
+            return False
 
-        # Use asyncio.get_running_loop() as a hint for what event loop is currently running.
-        try:
-            running_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = None
-
-        # Another MainLoop might be running with the same MainContext as ours.
-        if (running_loop is not self and isinstance(running_loop, GLibEventLoop)
-                and running_loop._context == self._context):
-            return running_loop._mainloop is not None and running_loop._mainloop.is_running()
-
-        # Not sure if our context is in a running loop or not.
-        return False
+        return running_loop._context == self._context
 
     def is_closed(self) -> bool:
         return False
