@@ -374,7 +374,8 @@ def _run_until_complete_cb(fut):
 
 
 class _CallbackWrapper:
-    """Wrapper that calls an exception handler if an exception occurs during callback invocation."""
+    """Wrapper that calls an exception handler if an exception occurs during callback invocation. If a context
+    is not provided, the wrapped callback will be called with a copy of the current context."""
 
     __slots__ = (
         '_callback',
@@ -398,7 +399,7 @@ class _CallbackWrapper:
         self._args = args
         self._exception_handler = exception_handler
         self._traceback = traceback
-        self._context = context
+        self._context = context if context is not None else contextvars.copy_context()
         self._handle = None  # type: Optional[GLibSourceHandle]
 
     def set_handle(self, handle: 'GLibSourceHandle') -> None:
@@ -406,10 +407,7 @@ class _CallbackWrapper:
 
     def __call__(self) -> bool:
         try:
-            if self._context is not None:
-                self._context.run(self._callback, *self._args)
-            else:
-                self._callback(*self._args)
+            self._context.run(self._callback, *self._args)
         except (SystemExit, KeyboardInterrupt):
             # Pass through SystemExit and KeyboardInterrupt
             raise
