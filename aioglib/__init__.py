@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import threading
-from typing import Optional, Any, Callable, Iterable, Mapping
+from typing import Optional, Any, Callable, Iterable, Mapping, Coroutine
 import traceback
 from gi.repository import GLib
 import logging
@@ -13,7 +13,11 @@ except ImportError:
 
 from . import _format_helpers
 
+PY_38 = sys.version_info >= (3, 8)
+PY_310 = sys.version_info >= (3, 10)
+
 _ExceptionHandler = Callable[[asyncio.AbstractEventLoop, Mapping], Any]
+_TaskFactory = Callable[[asyncio.AbstractEventLoop, Coroutine], asyncio.Task]
 
 logger = logging.getLogger(__package__)
 
@@ -83,6 +87,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         self._mainloop = None  # type: Optional[GLib.MainLoop]
         self._exception_handler = None  # type: Optional[_ExceptionHandler]
         self._debug = False
+        self._task_factory = None  # type: Optional[_TaskFactory]
 
     def run_forever(self):
         self._check_running()
@@ -321,14 +326,36 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def create_future(self):
         return asyncio.Future(loop=self)
 
-    def create_task(self, coro):
-        raise NotImplementedError
+    def create_task(self, coro, *, name: Optional[str] = None) -> asyncio.Task:
+        if self._task_factory is None:
+            if PY_310:
+                task = asyncio.Task(coro, name=name)
+            elif PY_38:
+                task = asyncio.Task(coro, loop=self, name=name)
+            else:
+                task = asyncio.Task(coro, loop=self)
+        else:
+            task = self._task_factory(self, coro)
+            if name is not None:
+                try:
+                    # Task.set_name() was added in Python 3.8.
+                    task.set_name(name)
+                except AttributeError:
+                    pass
 
-    def get_task_factory(self):
-        return None
+        if hasattr(task, '_source_traceback') and isinstance(task._source_traceback, list):
+            task._source_traceback.pop()
 
-    def set_task_factory(self, factory):
-        raise NotImplementedError
+        return task
+
+    def get_task_factory(self) -> Optional[_TaskFactory]:
+        return self._task_factory
+
+    def set_task_factory(self, factory: Optional[_TaskFactory]):
+        if factory is not None and not callable(factory):
+            raise TypeError("A callable object or None is expected, got {!r}".format(factory))
+
+        self._task_factory = factory
 
     def add_reader(self, fd, callback, *args):
         raise NotImplementedError
