@@ -82,6 +82,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         self._context = context
         self._mainloop = None  # type: Optional[GLib.MainLoop]
         self._exception_handler = None  # type: Optional[_ExceptionHandler]
+        self._debug = False
 
     def run_forever(self):
         self._check_running()
@@ -346,8 +347,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def remove_signal_handler(self, signum):
         raise NotImplementedError
-
-    _debug = False
 
     def set_debug(self, enabled: bool) -> None:
         self._debug = enabled
