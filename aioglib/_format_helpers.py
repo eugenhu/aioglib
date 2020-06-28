@@ -3,7 +3,7 @@ import inspect
 import reprlib
 import sys
 import traceback
-from typing import Optional, Any, Tuple, Sequence, Mapping
+from typing import Optional, Any, Tuple, Iterable, Mapping
 from types import FrameType
 
 from . import constants
@@ -27,7 +27,7 @@ def get_function_source(func: Any) -> Optional[Tuple[str, int]]:
     return None
 
 
-def format_callback_source(func: Any, args: Sequence) -> str:
+def format_callback_source(func: Any, args: Iterable) -> str:
     func_repr = format_callback(func, args, None)
     source = get_function_source(func)
     if source:
@@ -49,7 +49,7 @@ def format_args_and_kwargs(args, kwargs) -> str:
     return '({})'.format(', '.join(items))
 
 
-def format_callback(func: Any, args: Sequence, kwargs: Mapping[str, Any], suffix='') -> str:
+def format_callback(func: Any, args: Iterable, kwargs: Optional[Mapping[str, Any]], suffix='') -> str:
     if isinstance(func, functools.partial):
         suffix = format_args_and_kwargs(args, kwargs) + suffix
         return format_callback(func.func, func.args, func.keywords, suffix)
