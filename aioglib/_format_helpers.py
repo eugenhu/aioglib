@@ -31,7 +31,7 @@ def format_callback_source(func: Any, args: Iterable) -> str:
     func_repr = format_callback(func, args, None)
     source = get_function_source(func)
     if source:
-        func_repr += f' at {source[0]}:{source[1]}'
+        func_repr += ' at {source[0]}:{source[1]}'.format(source=source)
     return func_repr
 
 
@@ -45,7 +45,7 @@ def format_args_and_kwargs(args, kwargs) -> str:
     if args:
         items.extend(reprlib.repr(arg) for arg in args)
     if kwargs:
-        items.extend(f'{k}={reprlib.repr(v)}' for k, v in kwargs.items())
+        items.extend('{}={}'.format(k, reprlib.repr(v)) for k, v in kwargs.items())
     return '({})'.format(', '.join(items))
 
 
@@ -71,7 +71,7 @@ def format_callback(func: Any, args: Iterable, kwargs: Optional[Mapping[str, Any
 
 def extract_stack(f: Optional[FrameType] = None, limit: Optional[int] = None) -> traceback.StackSummary:
     """Replacement for traceback.extract_stack() that only does the necessary work for asyncio debug mode."""
-    f = f if f is not None else sys._getframe().f_back
+    f = f if f is not None else sys._getframe(1)
 
     # Limit the amount of work to a reasonable amount, as extract_stack() can be called for each coroutine
     # and future in debug mode.
