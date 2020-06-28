@@ -311,6 +311,8 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         handle = GLibSourceHandle(source)
         callback_wrapper.set_handle(handle)
 
+        source.attach(self._context)
+
         return handle
 
     def _check_callback(self, callback: Any, method: str) -> None:
