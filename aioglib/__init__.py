@@ -435,7 +435,7 @@ class _CallbackWrapper:
     def set_handle(self, handle: 'GLibSourceHandle') -> None:
         self._handle = handle
 
-    def __call__(self) -> bool:
+    def __call__(self, user_data) -> bool:
         try:
             self._context.run(self._callback, *self._args)
         except (SystemExit, KeyboardInterrupt):
