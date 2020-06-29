@@ -6,25 +6,9 @@ import traceback
 from typing import Optional, Any, Tuple, Iterable, Mapping
 from types import FrameType
 
+from gi.repository import GLib
+
 from . import constants
-
-
-def get_function_source(func: Any) -> Optional[Tuple[str, int]]:
-    """Return a (filename, firstlineno) pair where `filename` is the name of the file where `func` was defined
-    and `firstlineno` is the first line number of its definition. Return None if can't be determined."""
-    func = inspect.unwrap(func)
-
-    if inspect.isfunction(func):
-        code = func.__code__
-        return (code.co_filename, code.co_firstlineno)
-
-    if isinstance(func, functools.partial):
-        return get_function_source(func.func)
-
-    if isinstance(func, functools.partialmethod):
-        return get_function_source(func.func)
-
-    return None
 
 
 def format_callback_source(func: Any, args: Iterable) -> str:
@@ -69,6 +53,24 @@ def format_callback(func: Any, args: Iterable, kwargs: Optional[Mapping[str, Any
     return func_repr
 
 
+def get_function_source(func: Any) -> Optional[Tuple[str, int]]:
+    """Return a (filename, firstlineno) pair where `filename` is the name of the file where `func` was defined
+    and `firstlineno` is the first line number of its definition. Return None if can't be determined."""
+    func = inspect.unwrap(func)
+
+    if inspect.isfunction(func):
+        code = func.__code__
+        return (code.co_filename, code.co_firstlineno)
+
+    if isinstance(func, functools.partial):
+        return get_function_source(func.func)
+
+    if isinstance(func, functools.partialmethod):
+        return get_function_source(func.func)
+
+    return None
+
+
 def extract_stack(f: Optional[FrameType] = None, limit: Optional[int] = None) -> traceback.StackSummary:
     """Replacement for traceback.extract_stack() that only does the necessary work for asyncio debug mode."""
     f = f if f is not None else sys._getframe(1)
@@ -87,3 +89,12 @@ def extract_stack(f: Optional[FrameType] = None, limit: Optional[int] = None) ->
     stack.reverse()
 
     return stack
+
+
+def get_running_context() -> Optional[GLib.MainContext]:
+    """Return the context of the currently dispatching GLib.Source."""
+    current_source = GLib.main_current_source()
+    if current_source is None:
+        return None
+
+    return current_source.get_context()
