@@ -7,6 +7,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from gi.repository import GLib
 
 from . import _helpers
+from . import constants
 from ._log import logger
 from ._types import ExceptionHandler, TaskFactory
 
@@ -21,6 +22,7 @@ __all__ = [
 ]
 
 
+PY_37 = sys.version_info >= (3, 7)
 PY_38 = sys.version_info >= (3, 8)
 PY_310 = sys.version_info >= (3, 10)
 
@@ -31,6 +33,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         self._mainloop = None  # type: Optional[GLib.MainLoop]
         self._exception_handler = None  # type: Optional[ExceptionHandler]
         self._debug = False
+        self._coroutine_origin_tracking_enabled = self._debug
         self._task_factory = None  # type: Optional[TaskFactory]
 
     def run_forever(self):
@@ -321,9 +324,32 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def set_debug(self, enabled: bool) -> None:
         self._debug = enabled
+        self._set_coroutine_origin_tracking(enabled)
 
     def get_debug(self) -> bool:
         return self._debug
+
+    # "Static" variable for below method.
+    _cot_saved_depth = None
+
+    def _set_coroutine_origin_tracking(self, enabled: bool) -> None:
+        # Requires sys.get_coroutine_origin_tracking_depth(), added in Python 3.7.
+        if not PY_37: return
+
+        if bool(enabled) == bool(self._coroutine_origin_tracking_enabled):
+            return
+
+        if enabled:
+            # Save tracking depth to restore later.
+            self._cot_saved_depth = sys.get_coroutine_origin_tracking_depth()
+            sys.set_coroutine_origin_tracking_depth(constants.DEBUG_STACK_DEPTH)
+        else:
+            # Restore original depth.
+            if self._cot_saved_depth is not None:
+                sys.set_coroutine_origin_tracking_depth(self._cot_saved_depth)
+                self._cot_saved_depth = None
+
+        self._coroutine_origin_tracking_enabled = enabled
 
     @property
     def context(self) -> GLib.MainContext:
