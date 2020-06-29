@@ -325,6 +325,10 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def get_debug(self) -> bool:
         return self._debug
 
+    @property
+    def context(self) -> GLib.MainContext:
+        return self._context
+
 
 def _run_until_complete_cb(fut):
     if not fut.cancelled():
