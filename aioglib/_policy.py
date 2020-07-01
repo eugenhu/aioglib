@@ -1,7 +1,7 @@
 import asyncio
 from gi.repository import GLib
 import threading
-from typing import Optional, MutableMapping, NoReturn
+from typing import MutableMapping
 import sys
 import weakref
 
@@ -23,8 +23,6 @@ class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 
     def get_event_loop(self) -> GLibEventLoop:
         context = self._get_current_context()
-        if context is None:
-            self._raise_no_context()
 
         with self._set_loops_lock:
             try:
@@ -39,8 +37,6 @@ class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 
     def set_event_loop(self, loop: GLibEventLoop) -> None:
         context = self._get_current_context()
-        if context is None:
-            self._raise_no_context()
 
         if loop.context != context:
             raise ValueError("Loop has a different context")
@@ -52,24 +48,14 @@ class GLibEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 
     def new_event_loop(self) -> GLibEventLoop:
         context = self._get_current_context()
-        if context is None:
-            self._raise_no_context()
-
         return GLibEventLoop(context)
 
-    def _get_current_context(self) -> Optional[GLib.MainContext]:
-        if threading.current_thread() is threading.main_thread():
-            context = GLib.MainContext.default()
-        else:
-            context = GLib.MainContext.get_thread_default()  # This could be None.
+    def _get_current_context(self) -> GLib.MainContext:
+        default_context = GLib.MainContext.get_thread_default()
+        if default_context is None:
+            default_context = GLib.MainContext.default()
 
-        return context
-
-    def _raise_no_context(self) -> NoReturn:
-        raise RuntimeError(
-            "No default context set for this thread ({})"
-            .format(threading.current_thread().name)
-        )
+        return default_context
 
     if sys.platform != 'win32':
         def get_child_watcher(self) -> asyncio.AbstractChildWatcher:
