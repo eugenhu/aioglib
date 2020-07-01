@@ -39,24 +39,34 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def run_until_complete(self, future: asyncio.Future) -> Any:
         self._check_running()
 
-        new_task = not asyncio.isfuture(future)
-        future = asyncio.ensure_future(future, loop=self)
-        if new_task:
-            # An exception is raised if the future didn't complete, so there is no need to log the "destroy
-            # pending task" message
+        new_task = False
+
+        if not asyncio.isfuture(future):
+            future = asyncio.ensure_future(future, loop=self)
+
+            # We wrapped `future` in a new Task since it was not a Future.
+            new_task = True
+
+            # An exception is raised if the new task doesn't complete, so there is no need to log the "destroy
+            # pending task" message.
             future._log_destroy_pending = False
+        else:
+            if _helpers.get_future_loop(future) is not self:
+                raise ValueError("Future does not belong to this loop")
 
         future.add_done_callback(_run_until_complete_cb)
         try:
             self._run_forever()
         except:
             if new_task and future.done() and not future.cancelled():
-                # The coroutine raised a BaseException. Consume the exception to not log a warning, the caller
-                # doesn't have access to the local task.
+                # The coroutine raised a BaseException. Consume the exception to not log a warning (Future
+                # will log a warning if its exception is not retrieved), the caller doesn't have access to the
+                # task wrapper we made.
                 future.exception()
             raise
         finally:
             future.remove_done_callback(_run_until_complete_cb)
+
         if not future.done():
             raise RuntimeError('Event loop stopped before Future completed.')
 
