@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import inspect
 import reprlib
@@ -98,3 +99,12 @@ def get_running_context() -> Optional[GLib.MainContext]:
         return None
 
     return current_source.get_context()
+
+
+def get_future_loop(fut: asyncio.Future) -> asyncio.AbstractEventLoop:
+    try:
+        # Future.get_loop() was added in Python 3.7.
+        return fut.get_loop()
+    except AttributeError:
+        # Access private '_loop' attribute as fallback.
+        return fut._loop
