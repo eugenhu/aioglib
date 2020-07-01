@@ -30,7 +30,7 @@ PY_310 = sys.version_info >= (3, 10)
 class GLibEventLoop(asyncio.AbstractEventLoop):
     def __init__(self, context: GLib.MainContext) -> None:
         self._context = context
-        self._mainloop = None  # type: Optional[GLib.MainLoop]
+        self._mainloop = GLib.MainLoop(context)  # type: GLib.MainLoop
         self._exception_handler = None  # type: Optional[ExceptionHandler]
         self._debug = False
         self._coroutine_origin_tracking_enabled = self._debug
@@ -90,33 +90,24 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             asyncio._set_running_loop(old_running_loop)
 
     def _run_mainloop(self) -> None:
-        got_ownership = self._context.acquire()
-        if not got_ownership:
+        if not self._context.acquire():
             raise RuntimeError(
                 "The current thread ({}) is not the owner of this loop's context ({})"
                 .format(threading.current_thread().name, self._context)
             )
 
         try:
-            self._mainloop = GLib.MainLoop(self._context)
             self._mainloop.run()
         finally:
             self._context.release()
-            self._mainloop = None
 
     def stop(self):
         self._quit_mainloop()
 
     def _quit_mainloop(self) -> None:
-        if self._mainloop is None:
-            return
-        
         self._mainloop.quit()
 
     def _is_mainloop_running(self) -> bool:
-        if self._mainloop is None:
-            return False
-
         return self._mainloop.is_running()
 
     def is_running(self) -> bool:
