@@ -120,7 +120,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             return True
 
         return False
-    
+
     _old_running_loop = None  # type: Optional[asyncio.AbstractEventLoop]
 
     def set_is_running(self, value: bool) -> None:
@@ -289,7 +289,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         if frame is not None:
             traceback = _helpers.extract_stack(frame)
-            source_name += ' created at {f.filename}:{f.lineno}'.format(f=frame)
+            source_name += ' created at {f.filename}:{f.lineno}'.format(f=traceback[-1])
         else:
             traceback = None
 
