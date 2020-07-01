@@ -92,19 +92,10 @@ def extract_stack(f: Optional[FrameType] = None, limit: Optional[int] = None) ->
     return stack
 
 
-def get_running_context() -> Optional[GLib.MainContext]:
-    """Return the context of the currently dispatching GLib.Source."""
-    current_source = GLib.main_current_source()
-    if current_source is None:
-        return None
-
-    return current_source.get_context()
-
-
 def get_future_loop(fut: asyncio.Future) -> asyncio.AbstractEventLoop:
     try:
         # Future.get_loop() was added in Python 3.7.
         return fut.get_loop()
     except AttributeError:
-        # Access private '_loop' attribute as fallback.
+        # Access private '_loop' attribute in asyncio.Future implementation as fallback.
         return fut._loop
