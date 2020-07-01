@@ -31,6 +31,9 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
     def __init__(self, context: GLib.MainContext) -> None:
         self._context = context
         self._mainloop = GLib.MainLoop(context)  # type: GLib.MainLoop
+
+        self._custom_running = False
+
         self._exception_handler = None  # type: Optional[ExceptionHandler]
         self._debug = False
         self._coroutine_origin_tracking_enabled = self._debug
@@ -85,33 +88,69 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         asyncio._set_running_loop(self)
 
         try:
-            self._run_mainloop()
+            if not self._context.acquire():
+                self._raise_not_owner()
+
+            try:
+                self._mainloop.run()
+            finally:
+                self._context.release()
         finally:
             asyncio._set_running_loop(old_running_loop)
 
-    def _run_mainloop(self) -> None:
-        if not self._context.acquire():
-            raise RuntimeError(
-                "The current thread ({}) is not the owner of this loop's context ({})"
-                .format(threading.current_thread().name, self._context)
-            )
-
-        try:
-            self._mainloop.run()
-        finally:
-            self._context.release()
+    def _raise_not_owner(self) -> None:
+        raise RuntimeError(
+            "The current thread ({}) is not the owner of this loop's context ({})"
+            .format(threading.current_thread().name, self._context)
+        )
 
     def stop(self):
-        self._quit_mainloop()
+        if self._custom_running:
+            raise RuntimeError(
+                "Can't stop loop as it was started externally"
+            )
 
-    def _quit_mainloop(self) -> None:
         self._mainloop.quit()
 
-    def _is_mainloop_running(self) -> bool:
-        return self._mainloop.is_running()
-
     def is_running(self) -> bool:
-        return _helpers.get_running_context() == self._context
+        if self._custom_running:
+            return True
+
+        if self._mainloop.is_running():
+            return True
+
+        return False
+    
+    _old_running_loop = None  # type: Optional[asyncio.AbstractEventLoop]
+
+    def set_is_running(self, value: bool) -> None:
+        if value:
+            if self._custom_running:
+                return
+
+            if not self._context.acquire():
+                self._raise_not_owner()
+
+            try:
+                # If self._mainloop is already running, we want to acquire self._context to make sure we're on
+                # the same thread before checking self._mainloop.is_running().
+                self._check_running()
+            except:
+                self._context.release()
+                raise
+
+            self._custom_running = True
+            self._old_running_loop = asyncio._get_running_loop()
+            asyncio._set_running_loop(self)
+        else:
+            if not self._custom_running:
+                return
+
+            self._context.release()
+
+            asyncio._set_running_loop(self._old_running_loop)
+            self._old_running_loop = None
+            self._custom_running = False
 
     def is_closed(self) -> bool:
         return False
