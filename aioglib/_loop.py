@@ -36,23 +36,8 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         self._coroutine_origin_tracking_enabled = self._debug
         self._task_factory = None  # type: Optional[TaskFactory]
 
-    def run_forever(self):
-        self._check_running()
-        self._check_is_owner()
-
-        old_running_loop = asyncio._get_running_loop()
-
-        try:
-            self._mainloop = GLib.MainLoop(self._context)
-            asyncio._set_running_loop(self)
-            self._mainloop.run()
-        finally:
-            self._mainloop = None
-            asyncio._set_running_loop(old_running_loop)
-
     def run_until_complete(self, future: asyncio.Future) -> Any:
         self._check_running()
-        self._check_is_owner()
 
         new_task = not asyncio.isfuture(future)
         future = asyncio.ensure_future(future, loop=self)
@@ -63,7 +48,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         future.add_done_callback(_run_until_complete_cb)
         try:
-            self.run_forever()
+            self._run_forever()
         except:
             if new_task and future.done() and not future.cancelled():
                 # The coroutine raised a BaseException. Consume the exception to not log a warning, the caller
@@ -77,24 +62,52 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         return future.result()
 
+    def run_forever(self):
+        self._check_running()
+        self._run_forever()
+
     def _check_running(self) -> None:
         if self.is_running():
             raise RuntimeError('This event loop is already running')
 
-    def _check_is_owner(self) -> None:
-        if not self._context.is_owner():
-            got_ownership = self._context.acquire()
-            if not got_ownership:
-                raise RuntimeError(
-                    "The current thread ({}) is not the owner of this loop's context ({})"
-                    .format(threading.current_thread().name, self._context)
-                )
+    def _run_forever(self):
+        old_running_loop = asyncio._get_running_loop()
+        asyncio._set_running_loop(self)
+
+        try:
+            self._run_mainloop()
+        finally:
+            asyncio._set_running_loop(old_running_loop)
+
+    def _run_mainloop(self) -> None:
+        got_ownership = self._context.acquire()
+        if not got_ownership:
+            raise RuntimeError(
+                "The current thread ({}) is not the owner of this loop's context ({})"
+                .format(threading.current_thread().name, self._context)
+            )
+
+        try:
+            self._mainloop = GLib.MainLoop(self._context)
+            self._mainloop.run()
+        finally:
+            self._context.release()
+            self._mainloop = None
 
     def stop(self):
+        self._quit_mainloop()
+
+    def _quit_mainloop(self) -> None:
         if self._mainloop is None:
             return
-
+        
         self._mainloop.quit()
+
+    def _is_mainloop_running(self) -> bool:
+        if self._mainloop is None:
+            return False
+
+        return self._mainloop.is_running()
 
     def is_running(self) -> bool:
         return _helpers.get_running_context() == self._context
