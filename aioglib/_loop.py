@@ -2,7 +2,7 @@ import asyncio
 import sys
 import threading
 import traceback
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional, NoReturn
 
 from gi.repository import GLib
 
@@ -98,7 +98,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         finally:
             asyncio._set_running_loop(old_running_loop)
 
-    def _raise_not_owner(self) -> None:
+    def _raise_not_owner(self) -> NoReturn:
         raise RuntimeError(
             "The current thread ({}) is not the owner of this loop's context ({})"
             .format(threading.current_thread().name, self._context)
