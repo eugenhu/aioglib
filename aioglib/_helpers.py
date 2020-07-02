@@ -7,8 +7,6 @@ import traceback
 from typing import Optional, Any, Tuple, Iterable, Mapping
 from types import FrameType
 
-from gi.repository import GLib
-
 from . import constants
 
 
