@@ -59,7 +59,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
         future.add_done_callback(_run_until_complete_cb)
         try:
-            self._run_forever()
+            self._run_mainloop()
         except:
             if new_task and future.done() and not future.cancelled():
                 # The coroutine raised a BaseException. Consume the exception to not log a warning (Future
@@ -77,13 +77,19 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def run_forever(self):
         self._check_running()
-        self._run_forever()
+        self._run_mainloop()
 
     def _check_running(self) -> None:
         if self.is_running():
             raise RuntimeError('This event loop is already running')
 
-    def _run_forever(self):
+    def stop(self):
+        if self._custom_running:
+            raise RuntimeError("Can't stop loop as it was started externally")
+
+        self._stop_mainloop()
+
+    def _run_mainloop(self):
         old_running_loop = asyncio._get_running_loop()
         asyncio._set_running_loop(self)
 
@@ -98,28 +104,11 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         finally:
             asyncio._set_running_loop(old_running_loop)
 
-    def _raise_not_owner(self) -> NoReturn:
-        raise RuntimeError(
-            "The current thread ({}) is not the owner of this loop's context ({})"
-            .format(threading.current_thread().name, self._context)
-        )
-
-    def stop(self):
-        if self._custom_running:
-            raise RuntimeError(
-                "Can't stop loop as it was started externally"
-            )
-
+    def _stop_mainloop(self) -> None:
         self._mainloop.quit()
 
-    def is_running(self) -> bool:
-        if self._custom_running:
-            return True
-
-        if self._mainloop.is_running():
-            return True
-
-        return False
+    def _is_mainloop_running(self) -> bool:
+        return self._mainloop.is_running()
 
     _old_running_loop = None  # type: Optional[asyncio.AbstractEventLoop]
 
@@ -152,82 +141,26 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             self._old_running_loop = None
             self._custom_running = False
 
+    def _raise_not_owner(self) -> NoReturn:
+        raise RuntimeError(
+            "The current thread ({}) is not the owner of this loop's context ({})"
+            .format(threading.current_thread().name, self._context)
+        )
+
+    def is_running(self) -> bool:
+        if self._custom_running:
+            return True
+
+        if self._is_mainloop_running():
+            return True
+
+        return False
+
     def is_closed(self) -> bool:
         return False
 
     def close(self):
         raise RuntimeError("close() not supported")
-
-    def get_exception_handler(self) -> Optional[ExceptionHandler]:
-        return self._exception_handler
-
-    def set_exception_handler(self, handler: Optional[ExceptionHandler]) -> None:
-        if handler is not None and not callable(handler):
-            raise TypeError('A callable object or None is expected, got {!r}'.format(handler))
-
-        self._exception_handler = handler
-
-    def call_exception_handler(self, context: Mapping) -> None:
-        if self._exception_handler is None:
-            try:
-                self.default_exception_handler(context)
-            except (SystemExit, KeyboardInterrupt):
-                raise
-            except BaseException:
-                # Second protection layer for unexpected errors in the default implementation.
-                logger.error('Exception in default exception handler', exc_info=True)
-        else:
-            try:
-                self._exception_handler(self, context)
-            except (SystemExit, KeyboardInterrupt):
-                raise
-            except BaseException as exc:
-                # Exception in the user set custom exception handler.
-                try:
-                    # Log the exception raised in the custom handler in the default handler.
-                    self.default_exception_handler({
-                        'message': 'Unhandled error in exception handler',
-                        'exception': exc,
-                        'context': context,
-                    })
-                except (SystemExit, KeyboardInterrupt):
-                    raise
-                except BaseException:
-                    # Again, in case there is an unexpected error in the default implementation.
-                    logger.error(
-                        msg='Exception in default exception handler while handling an unexpected error in '
-                            'custom exception handler',
-                        exc_info=True,
-                    )
-
-    def default_exception_handler(self, context):
-        message = context.get('message')
-        if not message:
-            message = 'Unhandled exception in event loop'
-
-        exception = context.get('exception')
-        if exception is not None:
-            exc_info = (type(exception), exception, exception.__traceback__)
-        else:
-            exc_info = False
-
-        log_lines = [message]
-        for key in sorted(context):
-            if key in {'message', 'exception'}:
-                continue
-
-            value = context[key]
-
-            if key == 'source_traceback':
-                tb = ''.join(traceback.format_list(value))
-                value = 'Object created at (most recent call last):\n'
-                value += tb.rstrip()
-            else:
-                value = repr(value)
-
-            log_lines.append('{}: {}'.format(key, value))
-
-        logger.error('\n'.join(log_lines), exc_info=exc_info)
 
     def call_soon(self, callback, *args, context=None) -> 'GLibSourceHandle':
         if self._debug:
@@ -248,10 +181,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         # Adding and removing sources to contexts is thread-safe.
         return self._idle_add(callback, args, context, frame)
 
-    def _idle_add(self, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
-        source = GLib.Idle()
-        return self._attach_source_with_callback(source, callback, args, context, frame)
-
     def call_later(self, delay, callback, *args, context=None):
         if self._debug:
             self._check_callback(callback, 'call_later')
@@ -271,6 +200,19 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         delay = when - self.time()
 
         return self._timeout_add(delay, callback, args, context, frame)
+
+    def _check_callback(self, callback: Any, method: str) -> None:
+        if (asyncio.iscoroutine(callback) or asyncio.iscoroutinefunction(callback)):
+            raise TypeError("coroutines cannot be used with {method}()".format(method=method))
+        if not callable(callback):
+            raise TypeError(
+                "a callable object was expected by {method}(), got {callback!r}"
+                .format(method=method, callback=callback)
+            )
+
+    def _idle_add(self, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
+        source = GLib.Idle()
+        return self._attach_source_with_callback(source, callback, args, context, frame)
 
     def _timeout_add(self, delay, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
         # GLib.Timeout expects milliseconds.
@@ -310,18 +252,6 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
         source.attach(self._context)
 
         return handle
-
-    def _check_callback(self, callback: Any, method: str) -> None:
-        if (asyncio.iscoroutine(callback) or asyncio.iscoroutinefunction(callback)):
-            raise TypeError("coroutines cannot be used with {method}()".format(method=method))
-        if not callable(callback):
-            raise TypeError(
-                "a callable object was expected by {method}(), got {callback!r}"
-                .format(method=method, callback=callback)
-            )
-
-    def time(self) -> float:
-        return GLib.get_monotonic_time()/1e6
 
     def create_future(self):
         return asyncio.Future(loop=self)
@@ -403,6 +333,80 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
                 self._cot_saved_depth = None
 
         self._coroutine_origin_tracking_enabled = enabled
+
+    def get_exception_handler(self) -> Optional[ExceptionHandler]:
+        return self._exception_handler
+
+    def set_exception_handler(self, handler: Optional[ExceptionHandler]) -> None:
+        if handler is not None and not callable(handler):
+            raise TypeError('A callable object or None is expected, got {!r}'.format(handler))
+
+        self._exception_handler = handler
+
+    def call_exception_handler(self, context: Mapping) -> None:
+        if self._exception_handler is None:
+            try:
+                self.default_exception_handler(context)
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException:
+                # Second protection layer for unexpected errors in the default implementation.
+                logger.error('Exception in default exception handler', exc_info=True)
+        else:
+            try:
+                self._exception_handler(self, context)
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except BaseException as exc:
+                # Exception in the user set custom exception handler.
+                try:
+                    # Log the exception raised in the custom handler in the default handler.
+                    self.default_exception_handler({
+                        'message': 'Unhandled error in exception handler',
+                        'exception': exc,
+                        'context': context,
+                    })
+                except (SystemExit, KeyboardInterrupt):
+                    raise
+                except BaseException:
+                    # Again, in case there is an unexpected error in the default implementation.
+                    logger.error(
+                        msg='Exception in default exception handler while handling an unexpected error in '
+                            'custom exception handler',
+                        exc_info=True,
+                    )
+
+    def default_exception_handler(self, context):
+        message = context.get('message')
+        if not message:
+            message = 'Unhandled exception in event loop'
+
+        exception = context.get('exception')
+        if exception is not None:
+            exc_info = (type(exception), exception, exception.__traceback__)
+        else:
+            exc_info = False
+
+        log_lines = [message]
+        for key in sorted(context):
+            if key in {'message', 'exception'}:
+                continue
+
+            value = context[key]
+
+            if key == 'source_traceback':
+                tb = ''.join(traceback.format_list(value))
+                value = 'Object created at (most recent call last):\n'
+                value += tb.rstrip()
+            else:
+                value = repr(value)
+
+            log_lines.append('{}: {}'.format(key, value))
+
+        logger.error('\n'.join(log_lines), exc_info=exc_info)
+
+    def time(self) -> float:
+        return GLib.get_monotonic_time()/1e6
 
     @property
     def context(self) -> GLib.MainContext:
