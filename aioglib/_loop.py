@@ -132,7 +132,9 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             self._old_running_loop = asyncio._get_running_loop()
             asyncio._set_running_loop(self)
         else:
-            if not self._custom_running:
+            if self.is_running() and not self._custom_running:
+                raise RuntimeError("Loop was started with run_forever() or run_until_complete()")
+            elif not self._custom_running:
                 return
 
             self._context.release()
