@@ -3,6 +3,7 @@ import sys
 import threading
 import traceback
 from typing import Any, Callable, Iterable, Mapping, Optional, NoReturn
+from types import FrameType
 
 from gi.repository import GLib
 
@@ -214,20 +215,20 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
 
     def _idle_add(self, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
         source = GLib.Idle()
-        return self._attach_source_with_callback(source, callback, args, context, frame)
+        return self._schedule_callback(source, callback, args, context, frame)
 
     def _timeout_add(self, delay, callback, args, context=None, frame=None) -> 'GLibSourceHandle':
         # GLib.Timeout expects milliseconds.
         source = GLib.Timeout(delay * 1000)
-        return self._attach_source_with_callback(source, callback, args, context, frame)
+        return self._schedule_callback(source, callback, args, context, frame)
 
-    def _attach_source_with_callback(
+    def _schedule_callback(
             self,
-            source,
-            callback,
-            args,
-            context=None,
-            frame=None,
+            source: GLib.Source,
+            callback: Callable,
+            args: Iterable,
+            callback_context: Optional[contextvars.Context] = None,
+            frame: Optional[FrameType] = None,
     ) -> 'GLibSourceHandle':
         source_name = _helpers.format_callback_source(callback, args)
 
@@ -244,7 +245,7 @@ class GLibEventLoop(asyncio.AbstractEventLoop):
             args=args,
             exception_handler=self.call_exception_handler,
             traceback=traceback,
-            context=context,
+            context=callback_context,
         )
         source.set_callback(callback_wrapper)
 
@@ -443,7 +444,7 @@ class _CallbackWrapper:
             self,
             callback: Callable,
             args: Iterable,
-            exception_handler: Callable[[Mapping], Any],
+            exception_handler: Optional[Callable[[Mapping], Any]] = None,
             traceback: Optional[traceback.StackSummary] = None,
             context: Optional[contextvars.Context] = None,
     ) -> None:
@@ -464,21 +465,22 @@ class _CallbackWrapper:
             # Pass through SystemExit and KeyboardInterrupt
             raise
         except BaseException as exc:
-            exc_context = {}
+            if self._exception_handler is not None:
+                exc_context = {}
 
-            exc_context['exception'] = exc
+                exc_context['exception'] = exc
 
-            exc_context['message'] = 'Exception in callback {callback_repr}'.format(
-                callback_repr=_helpers.format_callback_source(self._callback, self._args)
-            )
+                exc_context['message'] = 'Exception in callback {callback_repr}'.format(
+                    callback_repr=_helpers.format_callback_source(self._callback, self._args)
+                )
 
-            if self._handle:
-                exc_context['handle'] = self._handle
+                if self._handle:
+                    exc_context['handle'] = self._handle
 
-            if self._traceback:
-                exc_context['source_traceback'] = self._traceback
+                if self._traceback:
+                    exc_context['source_traceback'] = self._traceback
 
-            self._exception_handler(exc_context)
+                self._exception_handler(exc_context)
 
         # Not sure if this is necessary, but something similar is done in asyncio.Handle.
         self = None
